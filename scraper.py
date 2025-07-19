@@ -185,23 +185,36 @@ class GoodreadsScraper:
             else:
                 book_data['cover_url'] = ''
             
-            # Rating - try multiple selectors
+            # Rating - FIXED to use data-rating attribute
             rating_cell = soup.find('td', {'class': 'field rating'})
             if rating_cell:
-                # Look for different rating patterns
-                rating_spans = (rating_cell.find_all('span', {'class': 'staticStars'}) or
-                               rating_cell.find_all('span', class_=re.compile('stars')) or
-                               rating_cell.find_all('div', class_=re.compile('stars')))
-                
-                if rating_spans:
-                    rating_text = rating_spans[0].get('title', '') or rating_spans[0].get_text()
-                    rating_match = re.search(r'(\d+)', rating_text)
-                    book_data['my_rating'] = int(rating_match.group(1)) if rating_match else 0
+                # Look for div with class 'stars' and data-rating attribute
+                stars_div = rating_cell.find('div', {'class': 'stars'})
+                if stars_div and stars_div.has_attr('data-rating'):
+                    try:
+                        rating_value = stars_div.get('data-rating')
+                        # Handle case where data-rating might be "null" or empty
+                        if rating_value and rating_value.lower() != 'null':
+                            book_data['my_rating'] = int(rating_value)
+                        else:
+                            book_data['my_rating'] = 0
+                    except (ValueError, TypeError):
+                        book_data['my_rating'] = 0
                 else:
-                    # Try to find star images or other rating indicators
-                    star_imgs = rating_cell.find_all('img', src=re.compile('star'))
-                    filled_stars = [img for img in star_imgs if 'filled' in img.get('src', '')]
-                    book_data['my_rating'] = len(filled_stars) if filled_stars else 0
+                    # Fallback to old method if new structure not found
+                    rating_spans = (rating_cell.find_all('span', {'class': 'staticStars'}) or
+                                   rating_cell.find_all('span', class_=re.compile('stars')) or
+                                   rating_cell.find_all('div', class_=re.compile('stars')))
+                    
+                    if rating_spans:
+                        rating_text = rating_spans[0].get('title', '') or rating_spans[0].get_text()
+                        rating_match = re.search(r'(\d+)', rating_text)
+                        book_data['my_rating'] = int(rating_match.group(1)) if rating_match else 0
+                    else:
+                        # Try to find star images or other rating indicators
+                        star_imgs = rating_cell.find_all('img', src=re.compile('star'))
+                        filled_stars = [img for img in star_imgs if 'filled' in img.get('src', '')]
+                        book_data['my_rating'] = len(filled_stars) if filled_stars else 0
             else:
                 book_data['my_rating'] = 0
             
@@ -431,6 +444,7 @@ class GoodreadsScraper:
 def main():
     # Extract user ID from your URL. eg:
     # https://www.goodreads.com/user/show/your-userID
+    
     user_id = "your-userID"
     
     scraper = GoodreadsScraper()
