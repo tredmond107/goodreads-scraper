@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""
+Goodreads Book Scraper
+Scrapes your "read" books from Goodreads with manual login
+Outputs data to both JSON and CSV formats
+"""
+
+import time
+import json
+import csv
+from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
+import re
+
+class GoodreadsScraper:
+    def __init__(self):
+        self.driver = None
+        self.books = []
+        
+    def setup_driver(self):
+        """Initialize Chrome driver with options"""
+        chrome_options = Options()
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        try:
+            self.driver = webdriver.Chrome(options=chrome_options)
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        except Exception as e:
+            print(f"Error setting up Chrome driver: {e}")
+            print("Please make sure ChromeDriver is installed and in your PATH")
+            return False
+        return True
+    
+    def manual_login(self):
+        """Open login page and wait for user to log in manually"""
+        print("Opening Goodreads login page...")
+        self.driver.get("https://www.goodreads.com/user/sign_in")
+        
+        print("\n" + "="*50)
+        print("MANUAL LOGIN REQUIRED")
+        print("="*50)
+        print("1. Please log in to your Goodreads account in the browser window")
+        print("2. Once you're logged in and see your dashboard, come back here")
+        print("3. Press Enter to continue with scraping...")
+        print("="*50)
+        
+        input("Press Enter after you've successfully logged in...")
+        
+        # Verify login by checking if we can access the user's profile
+        try:
+            # Try to find user menu or profile link
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "siteHeader__personal"))
+            )
+            print("✓ Login verified! Proceeding with scraping...")
+            return True
+        except:
+            print("⚠ Could not verify login. Proceeding anyway...")
+            return True
+    
+    def get_total_pages(self, base_url):
+        """Get total number of pages to scrape with better detection"""
+        print("Checking total pages...")
+        self.driver.get(base_url)
+        time.sleep(3)
+        
+        try:
+            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            
+            # Try multiple selectors for pagination
+            pagination = (soup.find('div', {'class': 'pagination'}) or
+                         soup.find('div', class_=re.compile('pagination')) or
+                         soup.find('nav', class_=re.compile('pagination')))
+            
+            if pagination:
+                # Look for page numbers
+                page_links = pagination.find_all('a')
+                page_numbers = []
+                for link in page_links:
+                    text = link.get_text().strip()
+                    if text.isdigit():
+                        page_numbers.append(int(text))
+                
+                if page_numbers:
+                    max_page = max(page_numbers)
+                    print(f"Found pagination: max page {max_page}")
+                    return max_page
+            
+            # Alternative: look for "showing X-Y of Z" text
+            showing_text = soup.find(text=re.compile(r'showing.*of.*\d+', re.I))
+            if showing_text:
+                total_match = re.search(r'of\s+(\d+)', showing_text, re.I)
+                if total_match:
+                    total_books = int(total_match.group(1))
+                    books_per_page = 20  # Goodreads default
+                    total_pages = (total_books + books_per_page - 1) // books_per_page
+                    print(f"Calculated {total_pages} pages from total books: {total_books}")
+                    return total_pages
+            
+            print("Could not determine pagination, assuming multiple pages exist...")
+            # Try to navigate to page 2 to see if it exists
+            page_2_url = f"{base_url}&page=2"
+            self.driver.get(page_2_url)
+            time.sleep(2)
+            
+            # Check if page 2 has books
+            soup_2 = BeautifulSoup(self.driver.page_source, 'html.parser')
+            book_rows_2 = (soup_2.find_all('tr', {'class': 'bookalike review'}) or
+                          soup_2.find_all('tr', class_=re.compile('bookalike')) or
+                          [row for row in soup_2.find_all('tr') if row.find('img') and 'goodreads.com' in str(row)])
+            
+            if book_rows_2:
+                print("Page 2 exists, will discover pages dynamically")
+                return 999  # We'll discover the actual limit during scraping
+            else:
+                print("Only 1 page exists")
+                return 1
+                
+        except Exception as e:
+            print(f"Error determining total pages: {e}")
+            return 999  # We'll discover pages dynamically
+    
+    def debug_html_structure(self, book_row):
+        """Debug function to print the HTML structure"""
+        print("="*50)
+        print("DEBUG: HTML STRUCTURE FOR ONE BOOK ROW")
+        print("="*50)
+        print(str(book_row)[:2000])  # Print first 2000 characters
+        print("="*50)
+    
+    def extract_book_data(self, book_row, debug=False):
+        """Extract data from a single book row with improved selectors"""
+        try:
+            soup = BeautifulSoup(str(book_row), 'html.parser')
+            
+            if debug:
+                self.debug_html_structure(book_row)
+            
+            book_data = {}
+            
+            # Try multiple approaches for title and author
+            # Approach 1: Look for title cell
+            title_cell = soup.find('td', {'class': 'field title'})
+            if title_cell:
+                # Look for different possible title selectors
+                title_link = (title_cell.find('a', {'class': 'bookTitle'}) or 
+                             title_cell.find('a', title=True) or 
+                             title_cell.find('a'))
+                
+                if title_link:
+                    book_data['title'] = title_link.text.strip()
+                else:
+                    # Try to find any text in the title cell
+                    title_text = title_cell.get_text().strip()
+                    book_data['title'] = title_text.split('\n')[0] if title_text else "Unknown"
+                
+                # Look for author
+                author_link = (title_cell.find('a', {'class': 'authorName'}) or
+                              title_cell.find('span', {'class': 'authorName'}) or
+                              title_cell.find('div', {'class': 'authorName'}))
+                
+                if author_link:
+                    book_data['author'] = author_link.text.strip()
+                else:
+                    # Try to extract author from cell text
+                    cell_text = title_cell.get_text()
+                    lines = [line.strip() for line in cell_text.split('\n') if line.strip()]
+                    book_data['author'] = lines[1] if len(lines) > 1 else "Unknown"
+            else:
+                book_data['title'] = "Unknown"
+                book_data['author'] = "Unknown"
+            
+            # Cover image (this seems to be working)
+            cover_cell = soup.find('td', {'class': 'field cover'})
+            if cover_cell:
+                img = cover_cell.find('img')
+                book_data['cover_url'] = img.get('src', '') if img else ''
+            else:
+                book_data['cover_url'] = ''
+            
+            # Rating - try multiple selectors
+            rating_cell = soup.find('td', {'class': 'field rating'})
+            if rating_cell:
+                # Look for different rating patterns
+                rating_spans = (rating_cell.find_all('span', {'class': 'staticStars'}) or
+                               rating_cell.find_all('span', class_=re.compile('stars')) or
+                               rating_cell.find_all('div', class_=re.compile('stars')))
+                
+                if rating_spans:
+                    rating_text = rating_spans[0].get('title', '') or rating_spans[0].get_text()
+                    rating_match = re.search(r'(\d+)', rating_text)
+                    book_data['my_rating'] = int(rating_match.group(1)) if rating_match else 0
+                else:
+                    # Try to find star images or other rating indicators
+                    star_imgs = rating_cell.find_all('img', src=re.compile('star'))
+                    filled_stars = [img for img in star_imgs if 'filled' in img.get('src', '')]
+                    book_data['my_rating'] = len(filled_stars) if filled_stars else 0
+            else:
+                book_data['my_rating'] = 0
+            
+            # Date Read - flexible approach
+            date_read_cell = soup.find('td', {'class': 'field date_read'})
+            if date_read_cell:
+                date_text = (date_read_cell.find('div', {'class': 'date_read_value'}) or
+                            date_read_cell.find('span', {'class': 'date_read_value'}) or
+                            date_read_cell)
+                book_data['date_read'] = date_text.get_text().strip() if date_text else ''
+            else:
+                book_data['date_read'] = ''
+            
+            # Date Added - flexible approach
+            date_added_cell = soup.find('td', {'class': 'field date_added'})
+            if date_added_cell:
+                date_text = (date_added_cell.find('div', {'class': 'date_added_value'}) or
+                            date_added_cell.find('span', {'class': 'date_added_value'}) or
+                            date_added_cell)
+                book_data['date_added'] = date_text.get_text().strip() if date_text else ''
+            else:
+                book_data['date_added'] = ''
+            
+            # Review - flexible approach
+            review_cell = soup.find('td', {'class': 'field review'})
+            if review_cell:
+                review_text = review_cell.get_text().strip()
+                # Filter out common non-review text
+                if review_text and review_text not in ['Write a review', '[edit]', '...more']:
+                    book_data['review'] = review_text
+                else:
+                    book_data['review'] = ''
+            else:
+                book_data['review'] = ''
+            
+            # Average Rating
+            avg_rating_cell = soup.find('td', {'class': 'field avg_rating'})
+            if avg_rating_cell:
+                rating_text = avg_rating_cell.get_text().strip()
+                try:
+                    rating_match = re.search(r'(\d+\.?\d*)', rating_text)
+                    book_data['avg_rating'] = float(rating_match.group(1)) if rating_match else 0.0
+                except:
+                    book_data['avg_rating'] = 0.0
+            else:
+                book_data['avg_rating'] = 0.0
+            
+            # Number of Pages
+            pages_cell = soup.find('td', {'class': 'field num_pages'})
+            if pages_cell:
+                pages_text = pages_cell.get_text()
+                pages_match = re.search(r'(\d+)', pages_text)
+                book_data['pages'] = int(pages_match.group(1)) if pages_match else 0
+            else:
+                book_data['pages'] = 0
+            
+            # Publication Year
+            pub_cell = soup.find('td', {'class': 'field date_pub'})
+            if pub_cell:
+                pub_text = pub_cell.get_text()
+                year_match = re.search(r'\d{4}', pub_text)
+                book_data['publication_year'] = int(year_match.group()) if year_match else 0
+            else:
+                book_data['publication_year'] = 0
+            
+            return book_data
+        
+        except Exception as e:
+            print(f"Error extracting book data: {e}")
+            return None
+    
+    def scrape_page(self, url, page_num, debug_first_book=False):
+        """Scrape a single page of books"""
+        print(f"Scraping page {page_num}...")
+        self.driver.get(url)
+        time.sleep(3)  # Increased delay
+        
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        
+        # Try different selectors for book rows
+        book_rows = (soup.find_all('tr', {'class': 'bookalike review'}) or
+                    soup.find_all('tr', class_=re.compile('bookalike')) or
+                    soup.find_all('tr', class_=re.compile('review')))
+        
+        if not book_rows:
+            print("No book rows found with standard selectors, trying alternatives...")
+            # Try to find any table rows that might contain books
+            all_rows = soup.find_all('tr')
+            book_rows = [row for row in all_rows if row.find('img') and 'goodreads.com' in str(row)]
+            print(f"Found {len(book_rows)} rows with images")
+        
+        if not book_rows:
+            print("Still no rows found. Saving page HTML for debugging...")
+            with open(f'debug_page_{page_num}.html', 'w', encoding='utf-8') as f:
+                f.write(self.driver.page_source)
+            print(f"Saved page HTML to debug_page_{page_num}.html")
+        
+        page_books = []
+        for i, row in enumerate(book_rows):
+            # Debug first book if requested
+            debug_this = debug_first_book and i == 0
+            book_data = self.extract_book_data(row, debug=debug_this)
+            if book_data:
+                page_books.append(book_data)
+        
+        print(f"Found {len(page_books)} books on page {page_num}")
+        return page_books
+    
+    def scrape_books(self, user_id):
+        """Main scraping function with dynamic page discovery"""
+        base_url = f"https://www.goodreads.com/review/list/{user_id}?shelf=read&per_page=20"
+        
+        # Get initial page count estimate
+        estimated_pages = self.get_total_pages(base_url)
+        print(f"Starting scrape - estimated {estimated_pages} page(s)")
+        
+        # If we got 999 (dynamic discovery), we'll keep going until we hit an empty page
+        dynamic_discovery = estimated_pages == 999
+        
+        page = 1
+        consecutive_empty_pages = 0
+        
+        while True:
+            page_url = f"{base_url}&page={page}"
+            
+            # Debug first book on first page only
+            debug_first = (page == 1)
+            page_books = self.scrape_page(page_url, page, debug_first_book=debug_first)
+            
+            if page_books:
+                self.books.extend(page_books)
+                consecutive_empty_pages = 0
+                print(f"✓ Page {page}: {len(page_books)} books (total so far: {len(self.books)})")
+            else:
+                consecutive_empty_pages += 1
+                print(f"✗ Page {page}: No books found")
+                
+                # Stop if we hit 2 consecutive empty pages, or if we exceeded estimated pages
+                if consecutive_empty_pages >= 2 or (not dynamic_discovery and page > estimated_pages):
+                    print(f"Stopping scrape after {consecutive_empty_pages} empty pages")
+                    break
+            
+            page += 1
+            
+            # Safety limit
+            if page > 50:
+                print("Safety limit reached (50 pages), stopping")
+                break
+            
+            # Small delay between pages
+            time.sleep(1.5)
+        
+        print(f"\n✓ Scraping complete! Found {len(self.books)} total books across {page-1} pages")
+        return self.books
+    
+    def save_to_json(self, filename="goodreads_books.json"):
+        """Save books to JSON file"""
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'scrape_date': datetime.now().isoformat(),
+                    'total_books': len(self.books),
+                    'books': self.books
+                }, f, indent=2, ensure_ascii=False)
+            print(f"✓ Saved to {filename}")
+        except Exception as e:
+            print(f"Error saving JSON: {e}")
+    
+    def save_to_csv(self, filename="goodreads_books.csv"):
+        """Save books to CSV file"""
+        try:
+            if not self.books:
+                print("No books to save")
+                return
+            
+            # Get all possible field names
+            fieldnames = set()
+            for book in self.books:
+                fieldnames.update(book.keys())
+            fieldnames = sorted(list(fieldnames))
+            
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(self.books)
+            
+            print(f"✓ Saved to {filename}")
+        except Exception as e:
+            print(f"Error saving CSV: {e}")
+    
+    def run(self, user_id):
+        """Main run function"""
+        print("Goodreads Book Scraper")
+        print("=" * 30)
+        
+        if not self.setup_driver():
+            return
+        
+        try:
+            # Manual login
+            if not self.manual_login():
+                return
+            
+            # Scrape books
+            self.scrape_books(user_id)
+            
+            if self.books:
+                # Save to both formats
+                self.save_to_json()
+                self.save_to_csv()
+                
+                print(f"\n📚 Summary:")
+                print(f"   Total books scraped: {len(self.books)}")
+                print(f"   Files created: goodreads_books.json, goodreads_books.csv")
+            else:
+                print("No books found. Please check your user ID and shelf settings.")
+        
+        except KeyboardInterrupt:
+            print("\n\nScraping interrupted by user")
+        except Exception as e:
+            print(f"Error during scraping: {e}")
+        finally:
+            if self.driver:
+                self.driver.quit()
+                print("Browser closed")
+
+def main():
+    # Extract user ID from your URL
+    # https://www.goodreads.com/review/list/171519754-trevor-redmond?ref=nav_mybooks&shelf=read
+    user_id = "171519754-trevor-redmond"
+    
+    scraper = GoodreadsScraper()
+    scraper.run(user_id)
+
+if __name__ == "__main__":
+    main()
