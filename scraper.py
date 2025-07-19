@@ -429,9 +429,9 @@ class GoodreadsScraper:
                 print("Browser closed")
 
 def main():
-    # Extract user ID from your URL
-    # https://www.goodreads.com/review/list/171519754-trevor-redmond?ref=nav_mybooks&shelf=read
-    user_id = "171519754-trevor-redmond"
+    # Extract user ID from your URL. eg:
+    # https://www.goodreads.com/user/show/your-userID
+    user_id = "your-userID"
     
     scraper = GoodreadsScraper()
     scraper.run(user_id)
