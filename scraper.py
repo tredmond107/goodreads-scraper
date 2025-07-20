@@ -136,7 +136,7 @@ class GoodreadsScraper:
         print("="*50)
     
     def extract_book_data(self, book_row, debug=False):
-        """Extract data from a single book row with improved selectors"""
+        """Extract data from a single book row with improved selectors and fixed author extraction"""
         try:
             soup = BeautifulSoup(str(book_row), 'html.parser')
             
@@ -145,11 +145,13 @@ class GoodreadsScraper:
             
             book_data = {}
             
-            # Try multiple approaches for title and author
-            # Approach 1: Look for title cell
+            # Initialize with defaults
+            book_data['title'] = "Unknown"
+            book_data['author'] = "Unknown"
+            
+            # Extract title from title cell
             title_cell = soup.find('td', {'class': 'field title'})
             if title_cell:
-                # Look for different possible title selectors
                 title_link = (title_cell.find('a', {'class': 'bookTitle'}) or 
                              title_cell.find('a', title=True) or 
                              title_cell.find('a'))
@@ -157,27 +159,23 @@ class GoodreadsScraper:
                 if title_link:
                     book_data['title'] = title_link.text.strip()
                 else:
-                    # Try to find any text in the title cell
+                    # Fallback to any text in the title cell
                     title_text = title_cell.get_text().strip()
                     book_data['title'] = title_text.split('\n')[0] if title_text else "Unknown"
-                
-                # Look for author
-                author_link = (title_cell.find('a', {'class': 'authorName'}) or
-                              title_cell.find('span', {'class': 'authorName'}) or
-                              title_cell.find('div', {'class': 'authorName'}))
-                
+            
+            # Extract author from dedicated author cell
+            author_cell = soup.find('td', {'class': 'field author'})
+            if author_cell:
+                author_link = author_cell.find('a')
                 if author_link:
                     book_data['author'] = author_link.text.strip()
                 else:
-                    # Try to extract author from cell text
-                    cell_text = title_cell.get_text()
-                    lines = [line.strip() for line in cell_text.split('\n') if line.strip()]
-                    book_data['author'] = lines[1] if len(lines) > 1 else "Unknown"
+                    # Fallback to any text in the author cell
+                    book_data['author'] = author_cell.get_text().strip() or "Unknown"
             else:
-                book_data['title'] = "Unknown"
                 book_data['author'] = "Unknown"
             
-            # Cover image (this seems to be working)
+            # Cover image
             cover_cell = soup.find('td', {'class': 'field cover'})
             if cover_cell:
                 img = cover_cell.find('img')
@@ -299,6 +297,9 @@ class GoodreadsScraper:
                 book_data['publication_year'] = int(year_match.group()) if year_match else 0
             else:
                 book_data['publication_year'] = 0
+            
+            if debug:
+                print(f"DEBUG: Extracted - Title: '{book_data['title']}', Author: '{book_data['author']}'")
             
             return book_data
         
@@ -465,7 +466,8 @@ def main():
     # Extract user ID from your URL. eg:
     # https://www.goodreads.com/user/show/your-userID
     
-    user_id = "your-userID"
+    #user_id = "your-userID"
+    user_id = "171519754-trevor-redmond"
     
     scraper = GoodreadsScraper()
     scraper.run(user_id)
