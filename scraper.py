@@ -228,23 +228,43 @@ class GoodreadsScraper:
             else:
                 book_data['date_read'] = ''
             
-            # Date Added - flexible approach
+            # Date Added - flexible approach with header removal
             date_added_cell = soup.find('td', {'class': 'field date_added'})
             if date_added_cell:
                 date_text = (date_added_cell.find('div', {'class': 'date_added_value'}) or
                             date_added_cell.find('span', {'class': 'date_added_value'}) or
                             date_added_cell)
-                book_data['date_added'] = date_text.get_text().strip() if date_text else ''
+                if date_text:
+                    raw_date = date_text.get_text().strip()
+                    # Remove "date added" header if present
+                    if raw_date.lower().startswith('date added'):
+                        # Split by newlines and take the last non-empty line
+                        lines = [line.strip() for line in raw_date.split('\n') if line.strip()]
+                        book_data['date_added'] = lines[-1] if lines and lines[-1].lower() != 'date added' else ''
+                    else:
+                        book_data['date_added'] = raw_date
+                else:
+                    book_data['date_added'] = ''
             else:
                 book_data['date_added'] = ''
             
-            # Review - flexible approach
+            # Review - flexible approach with header removal
             review_cell = soup.find('td', {'class': 'field review'})
             if review_cell:
                 review_text = review_cell.get_text().strip()
-                # Filter out common non-review text
+                # Remove "review" header if present
+                if review_text.lower().startswith('review'):
+                    # Split by newlines and remove the first line if it's just "review"
+                    lines = review_text.split('\n')
+                    if lines and lines[0].strip().lower() == 'review':
+                        review_text = '\n'.join(lines[1:]).strip()
+                
+                # Filter out common non-review text and clean up
                 if review_text and review_text not in ['Write a review', '[edit]', '...more']:
-                    book_data['review'] = review_text
+                    # Remove trailing edit markers and more links
+                    review_text = re.sub(r'\n?\.\.\.s*more\s*$', '', review_text, flags=re.IGNORECASE)
+                    review_text = re.sub(r'\n?\[edit\]\s*$', '', review_text, flags=re.IGNORECASE)
+                    book_data['review'] = review_text.strip()
                 else:
                     book_data['review'] = ''
             else:
