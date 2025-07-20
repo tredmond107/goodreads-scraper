@@ -135,6 +135,33 @@ class GoodreadsScraper:
         print(str(book_row)[:2000])  # Print first 2000 characters
         print("="*50)
     
+    def clean_review_text(self, raw_review):
+        """Simple review text cleaning function"""
+        if not raw_review:
+            return ''
+        
+        # Remove "review" header if present (case insensitive)
+        review_text = re.sub(r'^review\s*\n?', '', raw_review, flags=re.IGNORECASE).strip()
+        
+        # Remove trailing "...more" patterns
+        review_text = re.sub(r'\n?\.\.\.s*more\s*$', '', review_text, flags=re.IGNORECASE)
+        
+        # Remove trailing [edit] markers
+        review_text = re.sub(r'\n?\[edit\]\s*$', '', review_text, flags=re.IGNORECASE)
+        
+        # Replace newlines with spaces and clean up multiple spaces
+        review_text = re.sub(r'\n+', ' ', review_text)
+        review_text = re.sub(r'\s+', ' ', review_text)
+        
+        # Final cleanup
+        review_text = review_text.strip()
+        
+        # Filter out common non-review text
+        if review_text.lower() in ['write a review', '[edit]', '...more']:
+            return ''
+        
+        return review_text
+    
     def extract_book_data(self, book_row, debug=False):
         """Extract data from a single book row with improved selectors and fixed author extraction"""
         try:
@@ -157,11 +184,15 @@ class GoodreadsScraper:
                              title_cell.find('a'))
                 
                 if title_link:
-                    book_data['title'] = title_link.text.strip()
+                    # Clean up title text - remove extra whitespace and newlines
+                    raw_title = title_link.text.strip()
+                    # Replace multiple whitespace (including newlines) with single spaces
+                    book_data['title'] = re.sub(r'\s+', ' ', raw_title)
                 else:
                     # Fallback to any text in the title cell
                     title_text = title_cell.get_text().strip()
-                    book_data['title'] = title_text.split('\n')[0] if title_text else "Unknown"
+                    cleaned_title = re.sub(r'\s+', ' ', title_text) if title_text else "Unknown"
+                    book_data['title'] = cleaned_title.split('\n')[0] if '\n' in cleaned_title else cleaned_title
             
             # Extract author from dedicated author cell
             author_cell = soup.find('td', {'class': 'field author'})
@@ -216,15 +247,32 @@ class GoodreadsScraper:
             else:
                 book_data['my_rating'] = 0
             
-            # Date Read - flexible approach
+            # Date Read - flexible approach with better cleaning
             date_read_cell = soup.find('td', {'class': 'field date_read'})
             if date_read_cell:
                 date_text = (date_read_cell.find('div', {'class': 'date_read_value'}) or
                             date_read_cell.find('span', {'class': 'date_read_value'}) or
                             date_read_cell)
-                book_data['date_read'] = date_text.get_text().strip() if date_text else ''
+                
+                if date_text:
+                    raw_date = date_text.get_text().strip()
+                    # Clean up the date read field
+                    # Remove "date read" header and extra whitespace
+                    cleaned_date = re.sub(r'date read\s*', '', raw_date, flags=re.IGNORECASE)
+                    # Remove [edit] markers
+                    cleaned_date = re.sub(r'\[edit\]', '', cleaned_date, flags=re.IGNORECASE)
+                    # Replace multiple whitespace with single spaces and strip
+                    cleaned_date = re.sub(r'\s+', ' ', cleaned_date).strip()
+                    
+                    # Check if it's "not set" or empty
+                    if not cleaned_date or cleaned_date.lower() in ['not set', '']:
+                        book_data['date_read'] = 'Date read not set'
+                    else:
+                        book_data['date_read'] = cleaned_date
+                else:
+                    book_data['date_read'] = 'Date read not set'
             else:
-                book_data['date_read'] = ''
+                book_data['date_read'] = 'Date read not set'
             
             # Date Added - flexible approach with header removal
             date_added_cell = soup.find('td', {'class': 'field date_added'})
@@ -246,25 +294,11 @@ class GoodreadsScraper:
             else:
                 book_data['date_added'] = ''
             
-            # Review - flexible approach with header removal
+            # Review - using the new cleaning function
             review_cell = soup.find('td', {'class': 'field review'})
             if review_cell:
                 review_text = review_cell.get_text().strip()
-                # Remove "review" header if present
-                if review_text.lower().startswith('review'):
-                    # Split by newlines and remove the first line if it's just "review"
-                    lines = review_text.split('\n')
-                    if lines and lines[0].strip().lower() == 'review':
-                        review_text = '\n'.join(lines[1:]).strip()
-                
-                # Filter out common non-review text and clean up
-                if review_text and review_text not in ['Write a review', '[edit]', '...more']:
-                    # Remove trailing edit markers and more links
-                    review_text = re.sub(r'\n?\.\.\.s*more\s*$', '', review_text, flags=re.IGNORECASE)
-                    review_text = re.sub(r'\n?\[edit\]\s*$', '', review_text, flags=re.IGNORECASE)
-                    book_data['review'] = review_text.strip()
-                else:
-                    book_data['review'] = ''
+                book_data['review'] = self.clean_review_text(review_text)
             else:
                 book_data['review'] = ''
             
@@ -462,12 +496,12 @@ class GoodreadsScraper:
                 self.driver.quit()
                 print("Browser closed")
 
+
 def main():
     # Extract user ID from your URL. eg:
     # https://www.goodreads.com/user/show/your-userID
     
-    #user_id = "your-userID"
-    user_id = "171519754-trevor-redmond"
+    user_id = "your-userID"
     
     scraper = GoodreadsScraper()
     scraper.run(user_id)
