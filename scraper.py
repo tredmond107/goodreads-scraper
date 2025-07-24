@@ -94,7 +94,7 @@ class GoodreadsScraper:
                     return max_page
             
             # Alternative: look for "showing X-Y of Z" text
-            showing_text = soup.find(text=re.compile(r'showing.*of.*\d+', re.I))
+            showing_text = soup.find(string=re.compile(r'showing.*of.*\d+', re.I))
             if showing_text:
                 total_match = re.search(r'of\s+(\d+)', showing_text, re.I)
                 if total_match:
@@ -167,8 +167,8 @@ class GoodreadsScraper:
         try:
             soup = BeautifulSoup(str(book_row), 'html.parser')
             
-            if debug:
-                self.debug_html_structure(book_row)
+            #if debug:
+            #    self.debug_html_structure(book_row)
             
             book_data = {}
             
@@ -350,8 +350,8 @@ class GoodreadsScraper:
             else:
                 book_data['publication_year'] = 0
             
-            if debug:
-                print(f"DEBUG: Extracted - Title: '{book_data['title']}', Author: '{book_data['author']}'")
+            #if debug:
+            #    print(f"DEBUG: Extracted - Title: '{book_data['title']}', Author: '{book_data['author']}'")
             
             return book_data
         
