@@ -518,9 +518,8 @@ class GoodreadsScraper:
 def main():
     # Extract user ID from your URL. eg:
     # https://www.goodreads.com/user/show/your-userID
-    # user_id = "your-userID"
 
-    user_id = "171519754-trevor-redmond"
+    user_id = "your-userID"
     
     scraper = GoodreadsScraper()
     scraper.run(user_id)
