@@ -25,7 +25,7 @@ Goodreads discontinued their public API in December 2020, making it impossible f
 
 1. **Clone or download the scraper**:
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/tredmond107/goodreads-scraper.git
    cd goodreads-scraper
    ```
 
