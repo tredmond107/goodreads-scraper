@@ -294,10 +294,28 @@ class GoodreadsScraper:
             else:
                 book_data['date_added'] = ''
             
-            # Review - using the new cleaning function
+            # Review - Target the full review text specifically
             review_cell = soup.find('td', {'class': 'field review'})
             if review_cell:
-                review_text = review_cell.get_text().strip()
+                # Find the span containing the full review text.
+                # This span usually has an ID starting with 'freeText' and is initially hidden,
+                # but contains the complete review.
+                full_review_span = review_cell.find('span', id=lambda x: x and x.startswith('freeText') and not x.startswith('freeTextContainer'))
+                if full_review_span:
+                    review_text = full_review_span.get_text().strip()
+                else:
+                    # Fallback: If the specific span isn't found, try get_text() but be more careful.
+                    # This might still risk duplication but is better than nothing.
+                    # Example: Get text directly inside the 'value' div, ignoring labels and links if possible.
+                    value_div = review_cell.find('div', {'class': 'value'})
+                    if value_div:
+                        # Get text, potentially excluding script/style/link tags if present
+                        review_text = value_div.get_text(separator=' ', strip=True)
+                        # Basic attempt to remove the '[edit]' link text if it sneaks in
+                        review_text = review_text.split('[edit]', 1)[0].strip()
+                    else:
+                        review_text = review_cell.get_text().strip()
+
                 book_data['review'] = self.clean_review_text(review_text)
             else:
                 book_data['review'] = ''
@@ -500,7 +518,8 @@ class GoodreadsScraper:
 def main():
     # Extract user ID from your URL. eg:
     # https://www.goodreads.com/user/show/your-userID
-    
+    # user_id = "your-userID"
+
     user_id = "your-userID"
     
     scraper = GoodreadsScraper()
