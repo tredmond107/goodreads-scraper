@@ -379,11 +379,11 @@ class GoodreadsScraper:
             book_rows = [row for row in all_rows if row.find('img') and 'goodreads.com' in str(row)]
             print(f"Found {len(book_rows)} rows with images")
         
-        if not book_rows:
-            print("Still no rows found. Saving page HTML for debugging...")
-            with open(f'debug_page_{page_num}.html', 'w', encoding='utf-8') as f:
-                f.write(self.driver.page_source)
-            print(f"Saved page HTML to debug_page_{page_num}.html")
+        #if not book_rows:
+        #    print("Still no rows found. Saving page HTML for debugging...")
+        #    with open(f'debug_page_{page_num}.html', 'w', encoding='utf-8') as f:
+        #        f.write(self.driver.page_source)
+        #    print(f"Saved page HTML to debug_page_{page_num}.html")
         
         page_books = []
         for i, row in enumerate(book_rows):
@@ -520,7 +520,7 @@ def main():
     # https://www.goodreads.com/user/show/your-userID
     # user_id = "your-userID"
 
-    user_id = "your-userID"
+    user_id = "171519754-trevor-redmond"
     
     scraper = GoodreadsScraper()
     scraper.run(user_id)
